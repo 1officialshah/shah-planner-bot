@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import json
 import os
 from dotenv import load_dotenv
@@ -39,43 +40,174 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Welcome to Shah’s Daily Planner!\n\n"
         "Commands:\n"
-        "/add <task> - Add a new task\n"
-        "/list - List all tasks\n"
-        "/done <task_number> - Mark a task as done"
+        "/add Category | Task\n"
+        "/list\n"
+        "/done <task #>\n"
+        "/progress\n"
+        "/remind <task #> <minutes>"
     )
 
+async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "Usage: /remind <task #> <minutes>"
+        )
+        return
+
+    try:
+        index = int(context.args[0]) - 1
+        minutes = int(context.args[1])
+    except ValueError:
+        await update.message.reply_text("Invalid format.")
+        return
+
+    user_tasks = get_user_tasks(user_id)
+
+    if index < 0 or index >= len(user_tasks):
+        await update.message.reply_text("Task not found.")
+        return
+
+    task = user_tasks[index]
+
+    # schedule reminder
+    context.job_queue.run_once(
+        send_reminder,
+        when=minutes * 60,
+        data={
+            "chat_id": update.effective_chat.id,
+            "task": task["text"],
+            "category": task.get("category", "General")
+        }
+    )
+
+    await update.message.reply_text(
+        f"⏰ Reminder set for '{task['text']}' in {minutes} minutes"
+    )
+
+async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+
+    await context.bot.send_message(
+        chat_id=job.data["chat_id"],
+        text=f"🔔 Reminder\n\n[{job.data['category']}] {job.data['task']}"
+    )
+
+async def set_progress(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "Usage: /progress <task #> <percent>"
+        )
+        return
+    
+    try:
+        index = int(context.args[0]) - 1
+        percent = int(context.args[1])
+    except:
+        await update.message.reply_text("Invalid format")
+        return
+    
+    if percent < 0 or percent > 100:
+        await update.message.reply_text("Percent must be 0-100")
+        return
+    
+    user_tasks = get_user_tasks(user_id)
+
+    if index < 0 or index >= len(user_tasks):
+        await update.message.reply_text("Task not found")
+        return
+    
+    user_tasks[index]["progress"] = percent
+
+    if percent == 100:
+        user_tasks[index]["done"] = True
+
+    update_user_tasks(user_id, user_tasks)
+
+    await update.message.reply_text(
+        f"📊 Updated: {user_tasks[index]['text']}  → {percent}%"
+    )
+
+from datetime import datetime
 
 async def add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if not context.args:
-        await update.message.reply_text("Usage: /add Buy groceries")
+        await update.message.reply_text(
+            "Usage: /add Category | Task"
+        )
         return
 
-    task_text = " ".join(context.args)
+    text = " ".join(context.args)
+
+    if "|" not in text:
+        await update.message.reply_text(
+            "Format: /add Work | Finish report"
+        )
+        return
+
+    category, task_text = [x.strip() for x in text.split("|", 1)]
 
     user_tasks = get_user_tasks(user_id)
-    user_tasks.append({"text": task_text, "done": False})
+
+    user_tasks.append({
+        "text": task_text,
+        "category": category,
+        "done": False,
+        "progress": 0,
+        "created": datetime.now().isoformat()
+    })
+
     update_user_tasks(user_id, user_tasks)
 
-    await update.message.reply_text(f"✅ Task added: {task_text}")
-
+    await update.message.reply_text(
+        f"✅ Added [{category}] {task_text}"
+    )
 
 async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_tasks = get_user_tasks(user_id)
 
     if not user_tasks:
-        await update.message.reply_text("No tasks yet. Add one with /add!")
+        await update.message.reply_text("No tasks yet.")
         return
 
-    message = "📋 Your Tasks:\n\n"
-    for i, task in enumerate(user_tasks, start=1):
-        status = "✅" if task["done"] else "❌"
-        message += f"{i}. {status} {task['text']}\n"
+    # group tasks by category
+    categories = {}
+
+    for i, task in enumerate(user_tasks, 1):
+        category = task.get("category", "General")
+
+        if category not in categories:
+            categories[category] = []
+
+        categories[category].append((i, task))
+
+    message = "📋 Your Tasks\n\n"
+
+    # display grouped
+    for category, tasks in categories.items():
+
+        message += f"📁 {category}\n"
+
+        for i, task in tasks:
+            progress = task.get("progress", 0)
+
+            if task.get("done"):
+                status = "✅"
+                progress = 100
+            else:
+                status = "⬜"
+
+            message += f"{i}. {status} {task['text']} ({progress}%)\n"
+
+        message += "\n"
 
     await update.message.reply_text(message)
-
 
 async def done_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -115,6 +247,8 @@ def main():
     app.add_handler(CommandHandler("add", add_task))
     app.add_handler(CommandHandler("list", list_tasks))
     app.add_handler(CommandHandler("done", done_task))
+    app.add_handler(CommandHandler("progress", set_progress))
+    app.add_handler(CommandHandler("remind", remind))
 
     print("Bot is running...")
     app.run_polling(drop_pending_updates=True, stop_signals=None)

@@ -2,11 +2,36 @@
     "8735004676": [
         {
             "text": "Go to the gym",
-            "done": true
+            "done": true,
+            "progress": 25
         },
         {
             "text": "Make music",
+            "done": false,
+            "progress": 80
+        },
+        {
+            "text": "Work",
             "done": false
+        },
+        {
+            "text": "Personal | Call Dad",
+            "done": false
+        },
+        {
+            "text": "Work | Build API",
+            "done": false
+        },
+        {
+            "text": "Fitness | 5km Run",
+            "done": false
+        },
+        {
+            "text": "Finish Report",
+            "category": "Work",
+            "done": false,
+            "progress": 0,
+            "created": "2026-03-28T13:38:28.348839"
         }
     ]
 }
