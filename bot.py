@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from telegram.ext import MessageHandler, filters
 import json
 import os
 from dotenv import load_dotenv
@@ -45,6 +46,49 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/done <task #>\n"
         "/progress\n"
         "/remind <task #> <minutes>"
+    )
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.lower().strip()
+
+    # ADD
+    if text.startswith("add "):
+        context.args = text[4:].split()
+        await add_task(update, context)
+        return
+
+    # LIST
+    if text in ["list", "show", "show tasks", "list tasks"]:
+        await list_tasks(update, context)
+        return
+
+    # DONE
+    if text.startswith("done "):
+        context.args = text.split()[1:]
+        await done_task(update, context)
+        return
+
+    # PROGRESS
+    if text.startswith("progress "):
+        context.args = text.split()[1:]
+        await set_progress(update, context)
+        return
+
+    # REMIND
+    if text.startswith("remind "):
+        context.args = text.split()[1:]
+        await remind(update, context)
+        return
+
+    # fallback help
+    await update.message.reply_text(
+        "I didn't understand.\n"
+        "Try:\n"
+        "add Buy groceries\n"
+        "list\n"
+        "done 1\n"
+        "progress 1 50\n"
+        "remind 1 30"
     )
 
 async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -249,6 +293,7 @@ def main():
     app.add_handler(CommandHandler("done", done_task))
     app.add_handler(CommandHandler("progress", set_progress))
     app.add_handler(CommandHandler("remind", remind))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     print("Bot is running...")
     app.run_polling(drop_pending_updates=True, stop_signals=None)
