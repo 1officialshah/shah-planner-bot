@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from telegram.ext import MessageHandler, filters
+from telegram.ext import MessageHandler, filters, ConversationHandler
 import json
 import os
 from dotenv import load_dotenv
@@ -48,8 +48,74 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/remind <task #> <minutes>"
     )
 
+async def show_category_prompt(update: Update, user_tasks: list):
+    categories = {}
+    for task in user_tasks:
+        cat = task.get("category", "General")
+        categories[cat] = categories.get(cat, 0) + 1
+
+    msg = "Which category?\n\n"
+    cat_list = list(categories.items())
+    for i, (cat, count) in enumerate(cat_list, 1):
+        msg += f"{i}. {cat} ({count} task{'s' if count != 1 else ''})\n"
+    msg += f"{len(cat_list) + 1}. + Create new category\n"
+    msg += "\nReply with a number or type a new category name."
+
+    await update.message.reply_text(msg)
+    return cat_list
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower().strip()
+    user_id = update.effective_user.id
+
+    # Handle pending category selection
+    if "pending_task" in context.user_data:
+        task_text = context.user_data.pop("pending_task")
+        cat_list = context.user_data.pop("pending_categories", [])
+
+        try:
+            choice = int(text)
+            if 1 <= choice <= len(cat_list):
+                category = cat_list[choice - 1][0]
+            elif choice == len(cat_list) + 1:
+                context.user_data["pending_task"] = task_text
+                await update.message.reply_text("Type the name of your new category:")
+                context.user_data["creating_category"] = True
+                return
+            else:
+                await update.message.reply_text("Invalid choice. Task not added.")
+                return
+        except ValueError:
+            category = update.message.text.strip()
+
+        user_tasks = get_user_tasks(user_id)
+        user_tasks.append({
+            "text": task_text,
+            "category": category,
+            "done": False,
+            "progress": 0,
+            "created": datetime.now().isoformat()
+        })
+        update_user_tasks(user_id, user_tasks)
+        await update.message.reply_text(f"✅ Added [{category}] {task_text}")
+        return
+
+    # Handle new category name input
+    if context.user_data.get("creating_category"):
+        context.user_data.pop("creating_category")
+        task_text = context.user_data.pop("pending_task")
+        category = update.message.text.strip()
+        user_tasks = get_user_tasks(user_id)
+        user_tasks.append({
+            "text": task_text,
+            "category": category,
+            "done": False,
+            "progress": 0,
+            "created": datetime.now().isoformat()
+        })
+        update_user_tasks(user_id, user_tasks)
+        await update.message.reply_text(f"✅ Added [{category}] {task_text}")
+        return
 
     # ADD
     if text.startswith("add "):
@@ -80,7 +146,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await remind(update, context)
         return
 
-    # fallback help
+    # fallback
     await update.message.reply_text(
         "I didn't understand.\n"
         "Try:\n"
@@ -181,36 +247,29 @@ async def add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if not context.args:
-        await update.message.reply_text(
-            "Usage: /add Category | Task"
-        )
+        await update.message.reply_text("Usage: /add Category | Task")
         return
 
     text = " ".join(context.args)
 
-    if "|" not in text:
-        await update.message.reply_text(
-            "Format: /add Work | Finish report"
-        )
-        return
-
-    category, task_text = [x.strip() for x in text.split("|", 1)]
-
-    user_tasks = get_user_tasks(user_id)
-
-    user_tasks.append({
-        "text": task_text,
-        "category": category,
-        "done": False,
-        "progress": 0,
-        "created": datetime.now().isoformat()
-    })
-
-    update_user_tasks(user_id, user_tasks)
-
-    await update.message.reply_text(
-        f"✅ Added [{category}] {task_text}"
-    )
+    if "|" in text:
+        category, task_text = [x.strip() for x in text.split("|", 1)]
+        user_tasks = get_user_tasks(user_id)
+        user_tasks.append({
+            "text": task_text,
+            "category": category,
+            "done": False,
+            "progress": 0,
+            "created": datetime.now().isoformat()
+        })
+        update_user_tasks(user_id, user_tasks)
+        await update.message.reply_text(f"✅ Added [{category}] {task_text}")
+    else:
+        task_text = text.strip()
+        user_tasks = get_user_tasks(user_id)
+        context.user_data["pending_task"] = task_text
+        cat_list = await show_category_prompt(update, user_tasks)
+        context.user_data["pending_categories"] = cat_list
 
 async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
