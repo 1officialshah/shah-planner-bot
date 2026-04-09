@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from telegram.ext import MessageHandler, filters, ConversationHandler
 import json
+import re
 import os
 from dotenv import load_dotenv
 from telegram import Update
@@ -87,6 +88,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
         except ValueError:
             category = update.message.text.strip()
+    if "mark" in text and "done" in text:
+        match = re.search(r"(\\d+)", text)
+    if match:
+        context.args = [match.group(1)]
+        await done_task(update, context)
+    return
 
         user_tasks = get_user_tasks(user_id)
         user_tasks.append({
