@@ -69,48 +69,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower().strip()
     user_id = update.effective_user.id
 
-    # Handle pending category selection
-    if "pending_task" in context.user_data:
-        task_text = context.user_data.pop("pending_task")
-        cat_list = context.user_data.pop("pending_categories", [])
-
-        try:
-            choice = int(text)
-            if 1 <= choice <= len(cat_list):
-                category = cat_list[choice - 1][0]
-            elif choice == len(cat_list) + 1:
-                context.user_data["pending_task"] = task_text
-                await update.message.reply_text("Type the name of your new category:")
-                context.user_data["creating_category"] = True
-                return
-            else:
-                await update.message.reply_text("Invalid choice. Task not added.")
-                return
-        except ValueError:
-            category = update.message.text.strip()
-    if "mark" in text and "done" in text:
-        match = re.search(r"(\\d+)", text)
-    if match:
-        context.args = [match.group(1)]
-        await done_task(update, context)
-    return
-
-        user_tasks = get_user_tasks(user_id)
-        user_tasks.append({
-            "text": task_text,
-            "category": category,
-            "done": False,
-            "progress": 0,
-            "created": datetime.now().isoformat()
-        })
-        update_user_tasks(user_id, user_tasks)
-        await update.message.reply_text(f"✅ Added [{category}] {task_text}")
-        return
-
-    # Handle new category name input
+    # Handle new category name input before generic pending-task handling.
     if context.user_data.get("creating_category"):
         context.user_data.pop("creating_category")
         task_text = context.user_data.pop("pending_task")
+        context.user_data.pop("pending_categories", None)
         category = update.message.text.strip()
         user_tasks = get_user_tasks(user_id)
         user_tasks.append({
@@ -121,7 +84,39 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "created": datetime.now().isoformat()
         })
         update_user_tasks(user_id, user_tasks)
-        await update.message.reply_text(f"✅ Added [{category}] {task_text}")
+        await update.message.reply_text(f"Added [{category}] {task_text}")
+        return
+
+    # Handle pending category selection
+    if "pending_task" in context.user_data:
+        task_text = context.user_data.pop("pending_task")
+        cat_list = context.user_data.pop("pending_categories", [])
+        try:
+            choice = int(text)
+            if 1 <= choice <= len(cat_list):
+                category = cat_list[choice - 1][0]
+            elif choice == len(cat_list) + 1:
+                context.user_data["pending_task"] = task_text
+                context.user_data["pending_categories"] = cat_list
+                context.user_data["creating_category"] = True
+                await update.message.reply_text("Type the name of your new category:")
+                return
+            else:
+                await update.message.reply_text("Invalid choice. Task not added.")
+                return
+        except ValueError:
+            category = update.message.text.strip()
+
+        user_tasks = get_user_tasks(user_id)
+        user_tasks.append({
+            "text": task_text,
+            "category": category,
+            "done": False,
+            "progress": 0,
+            "created": datetime.now().isoformat()
+        })
+        update_user_tasks(user_id, user_tasks)
+        await update.message.reply_text(f"Added [{category}] {task_text}")
         return
 
     # ADD
@@ -140,6 +135,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.args = text.split()[1:]
         await done_task(update, context)
         return
+
+    if "mark" in text and "done" in text:
+        match = re.search(r"\btask\s+(\d+)\b|\b(\d+)\b", text)
+        if match:
+            task_number = match.group(1) or match.group(2)
+            context.args = [task_number]
+            await done_task(update, context)
+            return
 
     # PROGRESS
     if text.startswith("progress "):
@@ -163,6 +166,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "progress 1 50\n"
         "remind 1 30"
     )
+
 
 async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -247,8 +251,6 @@ async def set_progress(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"📊 Updated: {user_tasks[index]['text']}  → {percent}%"
     )
-
-from datetime import datetime
 
 async def add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
